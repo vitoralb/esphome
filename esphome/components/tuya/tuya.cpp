@@ -13,6 +13,8 @@
 #include "esphome/components/captive_portal/captive_portal.h"
 #endif
 
+#include "weatherservice.h"
+
 namespace esphome {
 namespace tuya {
 
@@ -20,6 +22,8 @@ static const char *const TAG = "tuya";
 static const int COMMAND_DELAY = 10;
 static const int RECEIVE_TIMEOUT = 300;
 static const int MAX_RETRIES = 5;
+
+static const uint32_t WEATHER_UPDATE_INTERVAL_MS = 30 * 60000;  // 30 minutes
 
 void Tuya::setup() {
   this->set_interval("heartbeat", 15000, [this] { this->send_empty_command_(TuyaCommandType::HEARTBEAT); });
@@ -223,6 +227,41 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
       break;
     case TuyaCommandType::DATAPOINT_DELIVER:
       break;
+    case TuyaCommandType::WEATHER_OPEN:
+    {
+      std::string wanted_params;
+      std::vector<std::string> wanted_params_vec;
+      size_t i = 0;
+      while (i < len) {
+        if (i > 0) {
+          wanted_params += ", ";
+        }
+        uint8_t str_len = buffer[i];
+        i++;
+        if (i + str_len > len) {
+          ESP_LOGW(TAG, "Malformed weather open payload: string length exceeds buffer size.");
+          break;
+        }
+        std::string param(reinterpret_cast<const char *>(buffer + i), str_len);
+        wanted_params += param;
+        wanted_params_vec.push_back(param);
+        i += str_len;
+      }
+      ESP_LOGD(TAG, "MCU requested weather data with parameters: [%s]", wanted_params.c_str());
+      // Reply with success
+      this->send_command_(TuyaCommand{.cmd = TuyaCommandType::WEATHER_OPEN, .payload = std::vector<uint8_t>{0x01, 0x00}});
+      
+      if (this->weather_service_ == nullptr) {
+        ESP_LOGD(TAG, "Creating WeatherService.");
+        this->weather_service_ = make_unique<WeatherService>(this);
+        this->set_interval("weather_data", WEATHER_UPDATE_INTERVAL_MS, [this]() { this->weather_service_->send_weather_data(); });
+      }
+      this->weather_service_->start(wanted_params_vec);
+      break;
+
+    }
+    case TuyaCommandType::WEATHER_DATA:
+      break;
     case TuyaCommandType::DATAPOINT_REPORT_ASYNC:
     case TuyaCommandType::DATAPOINT_REPORT_SYNC:
       if (this->init_state_ == TuyaInitState::INIT_DATAPOINT) {
@@ -278,6 +317,17 @@ void Tuya::handle_command_(uint8_t command, uint8_t version, const uint8_t *buff
     case TuyaCommandType::EXTENDED_SERVICES: {
       uint8_t subcommand = buffer[0];
       switch ((TuyaExtendedServicesCommandType) subcommand) {
+        case TuyaExtendedServicesCommandType::WEATHER_DATA: {
+          this->send_command_(
+              TuyaCommand{.cmd = TuyaCommandType::EXTENDED_SERVICES,
+                          .payload = std::vector<uint8_t>{
+                              static_cast<uint8_t>(TuyaExtendedServicesCommandType::WEATHER_DATA), 0x00}});
+          if (this->weather_service_ != nullptr) {
+            ESP_LOGD(TAG, "Calling WeatherService from EXTENDED_SERVICES.");
+            this->weather_service_->send_weather_data();
+          }
+          break;
+        }
         case TuyaExtendedServicesCommandType::RESET_NOTIFICATION: {
           this->send_command_(
               TuyaCommand{.cmd = TuyaCommandType::EXTENDED_SERVICES,
@@ -707,6 +757,8 @@ void Tuya::register_listener(uint8_t datapoint_id, const std::function<void(Tuya
       func(datapoint);
   }
 }
+
+WeatherService *Tuya::get_weather_service() { return this->weather_service_.get(); }
 
 TuyaInitState Tuya::get_init_state() { return this->init_state_; }
 
