@@ -16,6 +16,9 @@
 namespace esphome {
 namespace tuya {
 
+// Forward declaration
+class WeatherService;
+
 enum class TuyaDatapointType : uint8_t {
   RAW = 0x00,      // variable length
   BOOLEAN = 0x01,  // 1 byte (0/1)
@@ -57,6 +60,8 @@ enum class TuyaCommandType : uint8_t {
   DATAPOINT_QUERY = 0x08,
   WIFI_TEST = 0x0E,
   LOCAL_TIME_QUERY = 0x1C,
+  WEATHER_OPEN = 0x20,
+  WEATHER_DATA = 0x21,
   DATAPOINT_REPORT_SYNC = 0x22,
   DATAPOINT_REPORT_ACK = 0x23,
   WIFI_RSSI = 0x24,
@@ -66,6 +71,7 @@ enum class TuyaCommandType : uint8_t {
 };
 
 enum class TuyaExtendedServicesCommandType : uint8_t {
+  WEATHER_DATA = 0x03,
   RESET_NOTIFICATION = 0x04,
   MODULE_RESET = 0x05,
   UPDATE_IN_PROGRESS = 0x0A,
@@ -116,6 +122,9 @@ class Tuya : public Component, public uart::UARTDevice {
     this->initialized_callback_.add(std::move(callback));
   }
 
+  WeatherService *get_weather_service();
+  void send_command_(const TuyaCommand &command);
+
  protected:
   void handle_char_(uint8_t c);
   void handle_datapoints_(const uint8_t *buffer, size_t len);
@@ -125,7 +134,6 @@ class Tuya : public Component, public uart::UARTDevice {
   void handle_command_(uint8_t command, uint8_t version, const uint8_t *buffer, size_t len);
   void send_raw_command_(TuyaCommand command);
   void process_command_queue_();
-  void send_command_(const TuyaCommand &command);
   void send_empty_command_(TuyaCommandType command);
   void set_numeric_datapoint_value_(uint8_t datapoint_id, TuyaDatapointType datapoint_type, uint32_t value,
                                     uint8_t length, bool forced);
@@ -160,6 +168,8 @@ class Tuya : public Component, public uart::UARTDevice {
   optional<TuyaCommandType> expected_response_{};
   uint8_t wifi_status_ = -1;
   CallbackManager<void()> initialized_callback_{};
+
+  std::unique_ptr<WeatherService> weather_service_{nullptr};
 };
 
 }  // namespace tuya
