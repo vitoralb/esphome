@@ -1,3 +1,5 @@
+#define ESPHOME_LOG_LEVEL ESPHOME_LOG_LEVEL_VERBOSE
+
 #include "tuya.h"
 #include "esphome/components/network/util.h"
 #include "esphome/core/gpio.h"
